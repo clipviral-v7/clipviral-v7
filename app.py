@@ -1,23 +1,66 @@
-from flask import Flask, render_template_string, request, redirect, session
-import os
+from flask import Flask, render_template_string
+
 app = Flask(__name__)
-app.secret_key = "clipviral_v7_secreto"
-CREDITOS = {"eduardo": 10}
-GALERIA = [
-    {"streamer": "Westcol", "titulo": "Westcol se enoja con la casa", "views": "1.2M", "thumb": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"},
-    {"streamer": "Westcol", "titulo": "La mejor reacción del stream", "views": "890K", "thumb": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"},
-]
-LANDING_HTML = """<!DOCTYPE html><html><head><meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-black text-white"><div class="min-h-screen flex flex-col items-center justify-center p-6 text-center"><h1 class="text-5xl font-black mb-4">Deja de editar 6 horas.<br><span class="text-purple-500">Nuestra IA clipea a Westcol por ti mientras duermes</span></h1><p class="text-xl text-gray-400 mt-4 mb-8">Pega el link, nosotros clipeamos, tú cobras.</p><a href="/login" class="bg-purple-600 px-8 py-4 rounded-full font-bold text-xl">Empezar a Farmear →</a></div></body></html>"""
-DASHBOARD_HTML = """<!DOCTYPE html><html><head><meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-zinc-900 text-white p-6"><div class="max-w-5xl mx-auto"><div class="flex justify-between items-center mb-8"><h1 class="text-2xl font-bold">Panel de Clipper</h1><div class="bg-zinc-800 px-4 py-2 rounded-full">Creditos: {{creditos}} ⚡</div></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6"><div class="bg-zinc-800 p-6 rounded-xl"><h2 class="font-bold mb-4">1. Farmear Streamer</h2><input placeholder="Pega link de Kick/Twitch/Youtube" class="w-full p-3 rounded bg-zinc-700 mb-3"><button onclick="alert('¡Clip generado! -1 credito')" class="w-full bg-purple-600 p-3 rounded font-bold">Generar Clips (1 credito)</button></div><div class="bg-zinc-800 p-6 rounded-xl"><h2 class="font-bold mb-4">2. Conectar TikTok</h2><button class="w-full bg-white text-black p-3 rounded font-bold">Conectar TikTok @tu_cuenta</button></div></div><h2 class="text-xl font-bold mt-10 mb-4">Galería Pública</h2><div class="grid grid-cols-2 md:grid-cols-3 gap-4">{% for clip in galeria %}<div class="bg-zinc-800 rounded-xl overflow-hidden"><img src="{{clip.thumb}}"><div class="p-3"><p class="font-bold text-sm">{{clip.titulo}}</p><p class="text-xs text-gray-400">{{clip.streamer}} · {{clip.views}}</p></div></div>{% endfor %}</div></div></body></html>"""
-@app.route("/")
-def landing(): return render_template_string(LANDING_HTML)
-@app.route("/login")
-def login():
-    session["user"] = "eduardo"
-    return redirect("/dashboard")
-@app.route("/dashboard")
-def dashboard():
-    if "user" not in session: return redirect("/")
-    return render_template_string(DASHBOARD_HTML, creditos=CREDITOS["eduardo"], galeria=GALERIA)
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+HTML = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClipViral AI - Convierte videos largos en clips virales</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #ffffff; color: #111; }
+nav { display:flex; justify-content:space-between; padding:18px 6%; border-bottom:1px solid #eee; align-items:center; }
+.logo { font-weight:800; font-size:22px; }
+.btn-black { background:#111; color:white; padding:10px 18px; border-radius:8px; text-decoration:none; font-size:14px; }
+.hero { max-width:900px; margin:0 auto; text-align:center; padding:80px 20px 40px; }
+.hero h1 { font-size:52px; line-height:1.05; letter-spacing:-2px; }
+.hero h1 span { background: linear-gradient(90deg,#7c3aed,#ec4899); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.hero p { color:#666; font-size:19px; margin-top:18px; }
+.box { background:white; border:1px solid #e5e7eb; box-shadow: 0 10px 40px rgba(0,0,0,0.08); border-radius:20px; padding:28px; margin:40px auto 0; max-width:640px; }
+input { width:100%; padding:18px; border-radius:12px; border:1px solid #ddd; font-size:16px; background:#f9fafb; }
+button.main { width:100%; margin-top:14px; padding:18px; border-radius:12px; border:none; background:#111; color:white; font-size:16px; font-weight:600; cursor:pointer; }
+.features { display:grid; grid-template-columns: repeat(3,1fr); gap:16px; max-width:900px; margin:60px auto; padding:0 20px; }
+.feat { background:#f9fafb; border-radius:16px; padding:20px; text-align:left; }
+.feat h3 { font-size:15px; margin-bottom:6px; }
+.feat p { font-size:13px; color:#666; margin:0; }
+@media(max-width:700px){ .hero h1{font-size:36px;} .features{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<nav>
+<div class="logo">ClipViral AI</div>
+<a class="btn-black" href="#">Iniciar Sesión</a>
+</nav>
+
+<div class="hero">
+<h1>Convierte videos largos en <span>clips virales</span> en 1 click con IA</h1>
+<p>Nuestra IA encuentra los momentos más virales, añade subtítulos animados y los deja listos para TikTok, Reels y Shorts.</p>
+
+<div class="box">
+<input id="link" placeholder="Pega aquí el link de YouTube, Podcast, Kick...">
+<button class="main" onclick="document.getElementById('result').style.display='block'">Generar Clips Virales →</button>
+<div id="result" style="display:none; margin-top:18px; text-align:left; background:#f0fdf4; border:1px solid #bbf7d0; padding:14px; border-radius:10px; font-size:14px;">
+✅ <b>IA Analizando...</b><br>En la versión completa aquí tu IA creará 5-10 clips con score viral, subtítulos y formato 9:16 automáticamente.
+</div>
+<p style="font-size:12px; color:#999; margin-top:12px;">Gratis • Sin marca de agua • Exporta en 1080p</p>
+</div>
+</div>
+
+<div class="features">
+<div class="feat"><h3>🎯 IA Viral Score</h3><p>Detecta ganchos, emociones y momentos con potencial millonario.</p></div>
+<div class="feat"><h3>💬 Subtítulos Animados</h3><p>Estilo Hormozi / MrBeast automático en español.</p></div>
+<div class="feat"><h3>📱 Reframe 9:16 Auto</h3><p>Centra la cara y crea clips perfectos para TikTok.</p></div>
+</div>
+</body>
+</html>
+"""
+
+@app.route('/')
+def home():
+    return render_template_string(HTML)
+
+if __name__ == '__main__':
+    app.run()
