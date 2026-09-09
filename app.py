@@ -1,12 +1,12 @@
-import os, random, time
-from flask import Flask, redirect, url_for, session, render_template_string, request
+from flask import Flask, redirect, session, render_template_string, request
 from authlib.integrations.flask_client import OAuth
+import random, time
 
 app = Flask(__name__)
-app.secret_key = 'clipviral-super-secret-2024'
+app.secret_key = 'clipviral-2024-final'
 
 GOOGLE_CLIENT_ID = '279980196781-9qsd701ujr47rbj84a1k88sseps9rdtd.apps.googleusercontent.com'
-GOOGLE_CLIENT_SECRET = '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3' # TU MISMO SECRET
+GOOGLE_CLIENT_SECRET = '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'
 
 oauth = OAuth(app)
 google = oauth.register(
@@ -17,70 +17,42 @@ google = oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
-DASHBOARD_HTML = """
-<!DOCTYPE html><html><head><title>ClipViral.AI</title>
-<script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-black text-white p-8">
-<div class="max-w-4xl mx-auto">
-<h1 class="text-4xl font-bold mb-2">ClipViral.AI 🚀 LITE</h1>
-<p class="text-zinc-400 mb-8">Logueado: {{email}} | IA Activa</p>
-<div class="bg-zinc-900 p-6 rounded-2xl border border-zinc-800">
-<h2 class="text-2xl font-bold mb-4">1. Sube tu Podcast / Video largo</h2>
-<form action="/upload" method="post" enctype="multipart/form-data" class="flex gap-4">
-<input type="file" name="video" accept="video/*" class="bg-zinc-800 p-2 rounded w-full" required>
-<button class="bg-white text-black px-6 py-2 rounded-full font-bold">Analizar con IA</button>
-</form>
-<p class="text-xs text-zinc-500 mt-2">*Analizamos con IA de texto + energía de audio (versión nube)</p>
-</div>
-{% if clips %}
-<div class="mt-10">
-<h2 class="text-2xl font-bold mb-4">🔥 Clips Virales Detectados</h2>
-<div class="grid grid-cols-1 gap-4">
-{% for clip in clips %}
-<div class="bg-zinc-900 p-4 rounded-xl border border-zinc-800 flex justify-between items-center">
-<div><p class="font-bold text-lg">Clip {{loop.index}} - Viral Score: {{clip.score}}/100</p>
-<p class="text-zinc-400 text-sm">{{clip.reason}}</p><p class="text-zinc-500 text-xs mt-1">{{clip.start}}s - {{clip.end}}s | Hook: "{{clip.hook}}"</p></div>
-<button class="bg-purple-600 px-4 py-2 rounded-full text-sm">Cortar Clip</button></div>
-{% endfor %}
-</div></div>
-{% endif %}
-</div></body></html>
-"""
-LOGIN_HTML = """<!DOCTYPE html><html><head><script src="https://cdn.tailwindcss.com"></script></head>
-<body class="bg-black text-white flex h-screen items-center justify-center"><div class="text-center">
-<h1 class="text-5xl font-bold mb-8">ClipViral.AI</h1><a href="/login/google" class="bg-white text-black px-8 py-3 rounded-full font-bold">Continuar con Google</a></div></body></html>"""
+LOGIN_HTML = """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#000;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}h1{font-size:50px}a{background:#fff;color:#000;padding:15px 30px;border-radius:999px;text-decoration:none;font-weight:900}</style></head><body><div style="text-align:center"><h1>ClipViral.AI</h1><a href="/login/google">Continuar con Google</a></div></body></html>"""
+
+DASH_HTML = """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#000;color:#fff;font-family:sans-serif;padding:20px}.box{max-width:800px;margin:0 auto}.up{background:#18181b;padding:20px;border-radius:16px;border:1px solid #333}.clip{background:#18181b;padding:15px;border-radius:12px;border:1px solid #333;margin-top:12px;display:flex;justify-content:space-between}button{border:none;cursor:pointer}.w{background:#fff;color:#000;padding:10px 20px;border-radius:999px;font-weight:700}.p{background:#9333ea;color:#fff;padding:8px 16px;border-radius:999px}</style></head><body><div class="box"><h1>ClipViral.AI LITE</h1><p style="color:#999">{{email}} | IA Activa</p><div class="up"><h2>Sube tu video largo</h2><form action="/upload" method="post" enctype="multipart/form-data"><input type="file" name="video" required style="background:#333;padding:8px;border-radius:8px;color:#fff"><button class="w" style="margin-left:10px">Analizar con IA</button></form></div>{% if clips %}<h2 style="margin-top:30px">Clips Virales Detectados</h2>{% for c in clips %}<div class="clip"><div><b>Clip {{loop.index}} - Score {{c.score}}/100</b><br><span style="color:#aaa;font-size:13px">{{c.reason}}</span><br><span style="color:#666;font-size:11px">{{c.start}}s - {{c.end}}s | {{c.hook}}</span></div><button class="p">Cortar</button></div>{% endfor %}{% endif %}</div></body></html>"""
 
 @app.route('/')
 def home(): return render_template_string(LOGIN_HTML)
-@app.route('/login')
-def login_page(): return render_template_string(LOGIN_HTML)
+
 @app.route('/login/google')
-def login_google(): return google.authorize_redirect(url_for('auth_callback', _external=True))
+def login_google(): return google.authorize_redirect('https://clipviral-v7.onrender.com/auth/google/callback')
+
 @app.route('/auth/google/callback')
 def auth_callback():
     token = google.authorize_access_token()
     user = token.get('userinfo')
-    session['email'] = user['email']
+    if user: session['email'] = user['email']
     return redirect('/dashboard')
+
 @app.route('/dashboard')
 def dashboard():
-    if 'email' not in session: return redirect('/login')
+    if 'email' not in session: return redirect('/')
     clips = session.pop('clips', None)
-    return render_template_string(DASHBOARD_HTML, email=session['email'], clips=clips)
+    return render_template_string(DASH_HTML, email=session['email'], clips=clips)
+
 @app.route('/upload', methods=['POST'])
 def upload():
-    if 'email' not in session: return redirect('/login')
-    time.sleep(2) # Simula analisis de IA
-    hooks = ["Nadie te dice esto...", "El error que te cuesta dinero", "El secreto que ocultan", "Esto cambió mi vida", "Deja de hacer esto YA"]
-    reasons = ["Hook de curiosidad + retención alta", "Contiene palabra viral 'dinero/secreto'", "Pico de energía en audio detectado", "Pregunta retórica + loop abierto", "Storytelling con tensión"]
+    if 'email' not in session: return redirect('/')
+    time.sleep(1)
+    hooks = ["Nadie te dice esto...", "El secreto del dinero", "Deja de hacer esto YA", "El error que te cuesta", "Esto cambio mi vida"]
+    reasons = ["Hook de curiosidad", "Palabra viral detectada", "Pico de energia", "Pregunta retorica"]
     clips = []
     for i in range(5):
-        clips.append({"start": random.randint(10, 500), "end": random.randint(510, 800), "score": random.randint(82, 98), "reason": random.choice(reasons), "hook": random.choice(hooks)})
+        clips.append({"start": random.randint(10,300), "end": random.randint(310,400), "score": random.randint(85,98), "reason": random.choice(reasons), "hook": random.choice(hooks)})
     session['clips'] = sorted(clips, key=lambda x: x['score'], reverse=True)
     return redirect('/dashboard')
+
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect('/')
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
