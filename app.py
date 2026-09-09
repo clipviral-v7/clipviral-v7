@@ -1,5 +1,31 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, redirect, url_for, session
+import os
+
+# --- FIX GOOGLE LOGIN - CLAVES DIRECTO ---
+os.environ["GOOGLE_CLIENT_ID"] = "279980196781-9qsd701ujr47rbj84a1k88sseps9rdtd.apps.googleusercontent.com"
+os.environ["GOOGLE_CLIENT_SECRET"] = "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"
+
 app = Flask(__name__)
+app.secret_key = "clipviral-secret-2026-key"
+
+# --- GOOGLE OAUTH ---
+try:
+    from authlib.integrations.flask_client import OAuth
+    oauth = OAuth(app)
+    google = oauth.register(
+        name='google',
+        client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+        client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+        access_token_url='https://oauth2.googleapis.com/token',
+        authorize_url='https://accounts.google.com/o/oauth2/auth',
+        api_base_url='https://www.googleapis.com/oauth2/v1/',
+        userinfo_endpoint='https://openidconnect.googleapis.com/v1/userinfo',
+        client_kwargs={'scope': 'openid email profile'},
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration'
+    )
+    HAS_OAUTH = True
+except:
+    HAS_OAUTH = False
 
 # LANDING PAGE - Presentación
 LANDING = """
@@ -46,7 +72,6 @@ body{background:#08080a;color:white;overflow-x:hidden}
 </body></html>
 """
 
-# DASHBOARD - El que ya tienes (92% score)
 DASHBOARD = """
 <!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dashboard - ClipViral.AI</title>
@@ -64,7 +89,7 @@ body{background:#0e0a1f;color:white}
 .upload{border:1px dashed #3a3560;border-radius:12px;padding:30px;text-align:center;color:#6b6490;font-size:13px;background:#151122;cursor:pointer}
 .upload b{color:#a78bfa}
 .field{background:#151122;border:1px solid #2a2540;border-radius:10px;padding:12px;margin-top:10px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#8b7fb0}
-.colors{display:flex;gap:8px;margin-top:10px}.dot{width:22px;height:22px;border-radius:50%;border:2px solid #2a2540;cursor:pointer}.dot.active{border-color:white}
+.colors{display:flex;gap:8px;margin-top:10px}.dot{width:22px;height:22px;border-radius:50%;border:2px solid #2a2a2e;cursor:pointer}.dot.active{border-color:white}
 .toggle{width:36px;height:20px;background:#3a3560;border-radius:20px;position:relative}.toggle::after{content:'';position:absolute;right:2px;top:2px;width:16px;height:16px;background:#a78bfa;border-radius:50%}
 .preview{background:#000;border-radius:16px;aspect-ratio:16/9;display:grid;place-items:center;border:1px solid #2a2540;position:relative;overflow:hidden}
 .stat{background:#1a1630;border:1px solid #2a2540;border-radius:16px;padding:16px;text-align:center}
@@ -73,10 +98,11 @@ body{background:#0e0a1f;color:white}
 .btn{background:linear-gradient(90deg,#8b5cf6,#a78bfa);border:none;width:100%;padding:16px;border-radius:12px;font-weight:900;color:white;cursor:pointer;font-size:14px}
 .right{display:grid;gap:16px}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.userpill{background:#2a2540;padding:6px 12px;border-radius:20px;font-size:12px;color:#a89ccf}
 @media(max-width:900px){.wrap{grid-template-columns:1fr}.stats{grid-template-columns:1fr}}
 </style></head>
 <body>
-<div class="nav"><a href="/" class="logo"><div class="logo-icon">▶</div>ClipViral.AI</a><div class="menu"><a href="/">← Volver a Home</a><b>Dashboard</b><span>Library</span><span>Analytics</span></div></div>
+<div class="nav"><a href="/" class="logo"><div class="logo-icon">▶</div>ClipViral.AI</a><div class="menu"><a href="/">← Volver a Home</a><b>Dashboard</b><span>%%USER%%</span><a href="/logout">Salir</a></div></div>
 <div class="wrap">
 <div>
 <div class="card"><h3>📤 Upload Video</h3><div class="upload">Drag & drop your video here<br><b>MP4, MOV • Max 3GB • 10h+ Videos</b><br><br><small>or click to browse</small></div></div>
@@ -99,14 +125,66 @@ body{background:#0e0a1f;color:white}
 </body></html>
 """
 
+LOGIN_PAGE = """
+<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login - ClipViral.AI</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Inter,sans-serif}
+body{background:#08080a;color:white;display:grid;place-items:center;height:100vh}
+.card{background:#121214;border:1px solid #1e1e22;border-radius:20px;padding:40px;max-width:380px;width:90%;text-align:center}
+h1{font-weight:900;font-size:28px;margin-bottom:8px}h1 span{color:#a855f7}
+p{color:#777;font-size:13px;margin-bottom:24px}
+.btn-google{background:white;color:black;padding:14px 20px;border-radius:12px;width:100%;display:flex;justify-content:center;align-items:center;gap:10px;font-weight:800;text-decoration:none;font-size:14px}
+small{color:#444;font-size:11px;margin-top:20px;display:block}
+</style></head><body>
+<div class="card">
+<h1>ClipViral<span>.AI</span></h1>
+<p>Inicia sesión para acceder a tu Dashboard PRO</p>
+<a href="/auth/google" class="btn-google"><img src="https://www.svgrepo.com/show/475656/google-color.svg" width="20"> Continuar con Google</a>
+<small>Al continuar aceptas nuestros Términos y Privacidad</small>
+<br><br><a href="/" style="color:#555;font-size:12px;text-decoration:none">← Volver al inicio</a>
+</div>
+</body></html>
+"""
+
 @app.route("/")
 def home():
     return render_template_string(LANDING)
 
+@app.route("/login")
+def login():
+    if 'user' in session:
+        return redirect('/dashboard')
+    return render_template_string(LOGIN_PAGE)
+
 @app.route("/dashboard")
 def dashboard():
-    return render_template_string(DASHBOARD)
+    if 'user' not in session:
+        return redirect('/login')
+    user_email = session['user'].get('email', 'Usuario')
+    html = DASHBOARD.replace("%%USER%%", f"<span class='userpill'>{user_email}</span>")
+    return render_template_string(html)
+
+@app.route("/auth/google")
+def auth_google():
+    if not HAS_OAUTH:
+        return "Falta instalar authlib: pon authlib en requirements.txt", 500
+    redirect_uri = url_for('auth_callback', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route("/auth/google/callback")
+def auth_callback():
+    if not HAS_OAUTH:
+        return "Falta authlib", 500
+    token = google.authorize_access_token()
+    user_info = google.get('userinfo').json()
+    session['user'] = user_info
+    return redirect('/dashboard')
+
+@app.route("/logout")
+def logout():
+    session.pop('user', None)
+    return redirect('/')
 
 if __name__ == "__main__":
-    import os
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
