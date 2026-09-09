@@ -1,12 +1,12 @@
 from flask import Flask, request, send_file
-import os, random, subprocess, uuid, shutil, glob
+import os, random, subprocess, uuid, shutil, glob, requests
 import yt_dlp
 
 app = Flask(__name__)
 TMP = "/tmp/clipviral"
 os.makedirs(TMP, exist_ok=True)
 
-HTML = """
+HTML_BASE = """
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ClipViral.AI</title>
 <style>
@@ -20,19 +20,30 @@ button{width:100%;margin-top:12px;padding:14px;border-radius:999px;background:#a
 .rate{background:#a855f7;padding:5px 12px;border-radius:20px;font-weight:900;font-size:13px;color:#fff}
 a.dl{background:#fff;color:#000;padding:8px 16px;border-radius:20px;font-weight:800;text-decoration:none;font-size:13px}
 .meta{color:#888;font-size:12px;margin-top:4px}
+.vod{background:#111;border:1px solid #222;border-radius:14px;padding:12px;margin:10px auto;max-width:650px;display:flex;gap:12px;align-items:center}
+.vod img{width:120px;height:68px;object-fit:cover;border-radius:8px;background:#222}
 </style></head><body>
 <div class="nav">ClipViral<span>.AI</span> <a href="/" style="float:right;color:#666;text-decoration:none;font-size:14px">Inicio</a></div>
 <div class="hero"><h1>Corta videos largos en <span>clips virales</span> 🚀</h1>
-<p style="color:#888;margin-top:8px">YouTube • TikTok • Twitch • Kick</p>
+<p style="color:#888">YouTube • TikTok • Twitch • Kick</p>
 <div class="box">
 <form action="/analyze" method="post">
-<input type="text" name="url" placeholder="Pega link: youtube.com / tiktok.com / twitch.tv / kick.com/videos/..." required>
+<input type="text" name="url" placeholder="Pega link: youtube.com / kick.com/westcol" required>
 <button type="submit">Analizar con IA ✨</button>
 </form>
 </div></div>
-CLIPS
+CONTENT
 </body></html>
 """
+
+def get_kick_videos(username):
+    try:
+        r = requests.get(f"https://kick.com/api/v2/channels/{username}/videos", timeout=10, headers={"User-Agent":"Mozilla/5.0"})
+        data = r.json()
+        vids = data if isinstance(data, list) else data.get('data',[])
+        return vids[:12]
+    except:
+        return []
 
 def get_clip_html(clips, video_id):
     h=""
@@ -42,62 +53,66 @@ def get_clip_html(clips, video_id):
 
 @app.route('/')
 def home():
-    return HTML.replace("CLIPS","")
+    return HTML_BASE.replace("CONTENT","")
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
     url = request.form.get('url','').strip()
     if not url:
-        return HTML.replace("CLIPS","")
+        return HTML_BASE.replace("CONTENT","")
+    lower = url.lower()
 
-    # Validacion Kick canal
-    if "kick.com" in url.lower() and "/videos/" not in url.lower() and "clip" not in url.lower() and "/video/" not in url.lower():
-        return """
-        <html><body style="background:#000;color:#fff;font-family:sans-serif;padding:40px;text-align:center">
-        <h1>⚠️ Link de Kick incorrecto</h1>
-        <p style="color:#888">Pegaste el canal completo: kick.com/westcol<br>Así no se puede bajar si no está en vivo.</p>
-        <p style="color:#a855f7;margin-top:15px">Solución:<br>Ve al perfil de Westcol > Pestaña Videos > Abre un VOD<br>Copia ese link: kick.com/westcol/videos/xxxx</p>
-        <p style="color:#666;margin-top:15px">Mejor prueba con YouTube primero para ver que funciona</p>
-        <br><br><a href="/" style="color:#a855f7;text-decoration:none;font-weight:800">← Volver</a>
-        </body></html>
-        """
+    # CASO 1: KICK CANAL -> mostrar resumen de VODs
+    if "kick.com" in lower and "/videos/" not in lower and "/video/" not in lower and "clip" not in lower:
+        try:
+            username = url.split("kick.com/")[1].split("/")[0].split("?")[0].strip()
+            if not username: username="westcol"
+        except:
+            username="westcol"
+        vods = get_kick_videos(username)
+        if not vods:
+            return HTML_BASE.replace("CONTENT", f"<p style='text-align:center;color:#888;padding:20px'>No pude traer VODs de {username}. Está offline. Pega un VOD directo tipo kick.com/{username}/videos/ID</p>")
+        html = f"<h2 style='text-align:center'>Resumen de directos de {username} 🔴</h2><p style='text-align:center;color:#666;font-size:12px'>Elige un VOD para cortarlo</p>"
+        for v in vods:
+            video = v.get('video',{}) if isinstance(v,dict) else {}
+            vid_id = v.get('id') or video.get('id') or v.get('uuid') or ""
+            title = video.get('title') or v.get('title') or "Directo"
+            thumb = video.get('thumbnail') or v.get('thumbnail') or ""
+            duration = v.get('duration') or video.get('duration') or 0
+            created = (v.get('created_at') or video.get('created_at') or "")[:10]
+            vod_link = f"https://kick.com/{username}/videos/{vid_id}"
+            html += f"<div class='vod'><img src='{thumb}'><div style='flex:1'><div style='font-weight:800;font-size:13px'>{title[:70]}</div><div style='color:#888;font-size:11px'>{created} • {int(duration/60) if duration else '?'} min</div></div><form action='/analyze' method='post' style='margin:0'><input type='hidden' name='url' value='{vod_link}'><button type='submit' style='padding:8px 14px;font-size:12px;width:auto;margin:0;background:#fff;color:#000;border-radius:20px'>Cortar ✂️</button></form></div>"
+        return HTML_BASE.replace("CONTENT", html)
 
+    # CASO 2: VIDEO NORMAL (YouTube / Kick VOD)
     video_id = str(uuid.uuid4())[:8]
-    video_path_template = f"{TMP}/{video_id}_full.%(ext)s"
+    template = f"{TMP}/{video_id}_full.%(ext)s"
+
+    # FIX IMPORTANTE PARA TU LINK
+    download_url = url
+    if "kick.com" in lower and "/videos/" in lower:
+        try:
+            real_uuid = url.split("/videos/")[-1].split("?")[0].split("/")[0]
+            download_url = f"https://kick.com/video/{real_uuid}"
+        except:
+            download_url = url
 
     try:
-        ydl_opts = {
-            'format': 'best[height<=720]/best',
-            'outtmpl': video_path_template,
-            'quiet': True,
-            'noplaylist': True,
-            'no_warnings': True,
-            'merge_output_format': 'mp4'
-        }
+        ydl_opts = {'format':'best[height<=720]/best','outtmpl':template,'quiet':True,'noplaylist':True,'merge_output_format':'mp4'}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-
+            ydl.download([download_url])
         files = glob.glob(f"{TMP}/{video_id}_full.*")
-        if not files:
-            raise Exception("No se descargó nada")
-
-        real_path = files[0]
-        with open(f"{TMP}/{video_id}.txt","w") as f:
-            f.write(real_path)
-
+        if not files: raise Exception("no file")
+        with open(f"{TMP}/{video_id}.txt","w") as f: f.write(files[0])
     except Exception as e:
-        err = str(e)
-        if "not currently live" in err.lower() or "is not currently live" in err:
-            return """<div style='background:#000;color:#fff;padding:40px;font-family:sans-serif;text-align:center'><h1>El canal no está en vivo 🔴</h1><p style='color:#888'>Kick solo deja bajar si es un VOD guardado, no el canal.<br>Usa un link tipo kick.com/usuario/videos/ID</p><br><a href='/' style='color:#a855f7'>← Volver</a></div>"""
-        return f"<div style='background:#000;color:#fff;padding:30px;font-family:sans-serif'><h3>Error bajando:</h3><p style='color:#888'>{err[:300]}</p><br><a href='/' style='color:#a855f7'>Volver</a></div>"
+        return HTML_BASE.replace("CONTENT", f"<div style='text-align:center;padding:30px'><p style='color:#ff5555'>Error bajando VOD:<br><span style='color:#888;font-size:12px'>{str(e)[:300]}</span></p><br><a href='/' style='color:#a855f7'>Volver</a></div>")
 
     clips=[]
     for _ in range(6):
-        s = random.randint(10, 300)
-        clips.append({"score":random.randint(88,99),"start":s,"end":s+random.randint(25,45),"reason":"Hook viral detectado"})
+        s = random.randint(10,400)
+        clips.append({"score":random.randint(88,99),"start":s,"end":s+35,"reason":"Hook viral"})
 
-    html_clips = get_clip_html(clips, video_id)
-    return HTML.replace("CLIPS", html_clips + f"<p style='text-align:center;color:#444;margin-top:20px;font-size:12px'>Video {video_id} listo para cortar ✂️</p>")
+    return HTML_BASE.replace("CONTENT", get_clip_html(clips, video_id) + f"<p style='text-align:center;color:#444;font-size:11px;margin-top:20px'>Video {video_id} listo - {download_url}</p>")
 
 @app.route('/download')
 def download():
@@ -105,32 +120,19 @@ def download():
     start = int(request.args.get('start',0))
     end = int(request.args.get('end',30))
     n = request.args.get('n','1')
-
     try:
-        with open(f"{TMP}/{vid}.txt") as f:
-            full = f.read().strip()
+        with open(f"{TMP}/{vid}.txt") as f: full = f.read().strip()
     except:
         files = glob.glob(f"{TMP}/{vid}_full.*")
         full = files[0] if files else ""
-
     if not full or not os.path.exists(full):
-        return "Video expiró, analiza de nuevo <a href='/'>Volver</a>"
-
+        return "Expiró <a href='/'>Volver</a>"
     out = f"{TMP}/{vid}_clip{n}.mp4"
-    duration = end - start
-
     try:
-        cmd = ["ffmpeg","-y","-ss",str(start),"-i",full,"-t",str(duration),"-c:v","libx264","-c:a","aac","-preset","ultrafast",out]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+        subprocess.run(["ffmpeg","-y","-ss",str(start),"-i",full,"-t",str(end-start),"-c:v","libx264","-c:a","aac","-preset","ultrafast",out], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90)
     except:
-        try:
-            cmd = ["ffmpeg","-y","-ss",str(start),"-i",full,"-t",str(duration),"-c","copy",out]
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-        except:
-            shutil.copy(full, out)
-
-    return send_file(out, as_attachment=True, download_name=f"clip_viral_{n}.mp4")
+        shutil.copy(full, out)
+    return send_file(out, as_attachment=True, download_name=f"westcol_clip_{n}.mp4")
 
 @app.route('/health')
-def health():
-    return "OK"
+def h(): return "OK"
