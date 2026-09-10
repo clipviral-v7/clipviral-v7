@@ -1,110 +1,178 @@
-import os, uuid, json, subprocess, random
-import boto3
-from flask import Flask, request, jsonify
-from botocore.client import Config
+"""Clipping API: análisis de transcripciones para encontrar momentos compartibles."""
+import json
+import os
+import tempfile
+from pathlib import Path
 
-app = Flask(__name__)
-TMP = "/tmp"
-R2_BUCKET = "clipviral"
-R2_PUBLIC = "https://pub-f843e09d0c254a84b59e7d1a6f9b57d1.r2.dev"
+from flask import Flask, jsonify, request, send_from_directory
+from openai import OpenAI
 
-s3 = boto3.client('s3',
-    endpoint_url=os.getenv("R2_ENDPOINT"),
-    aws_access_key_id=os.getenv("R2_ACCESS_KEY"),
-    aws_secret_access_key=os.getenv("R2_SECRET_KEY"),
-    config=Config(signature_version='s3v4'),
-    region_name='auto'
-)
+ROOT = Path(__file__).parent
+app = Flask(__name__, static_folder=None)
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # Límite seguro para la primera versión.
 
-# --- IA VIRAL LOGIC MOCK (Aquí conectamos Whisper + GPT después) ---
-def analyze_virality(video_path):
-    # En v2 esto es Whisper + OpenAI para detectar hooks reales
-    # Por ahora simula detección inteligente para que veas el dashboard
-    clips = []
-    for i in range(6):
-        start = i * 35 + random.randint(0,10)
-        clips.append({
-            "id": i,
-            "start": start,
-            "end": start + 30,
-            "hook": ["Pico de emoción", "Pregunta retórica", "Confesión", "Dato shock", "Historia personal", "Call to action"][i],
-            "virality_score": random.randint(88, 96),
-            "reason": f"Momento de alta retención detectado en {start}s - patrón viral"
-        })
-    # Ordenar por score
-    clips = sorted(clips, key=lambda x: x['virality_score'], reverse=True)
-    return clips
 
-def cut_vertical_clip(input_path, output_path, start, duration=30):
-    # Corta en vertical 9:16 con ffmpeg (funciona en Render)
-    cmd = [
-        "ffmpeg", "-y", "-ss", str(start), "-t", str(duration),
-        "-i", input_path,
-        "-vf", "crop=ih*9/16:ih,scale=1080:1920",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-        "-c:a", "aac", output_path
-    ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+@app.get("/")
+def landing():
+    return send_from_directory(ROOT, "index.html")
 
-@app.route('/')
+
+@app.get("/dashboard")
 def dashboard():
-    return """
-    <html><head><title>ClipViral AI</title>
-    <style>body{font-family:Arial;background:#0a0a0a;color:white;text-align:center;padding:20px}
-   .card{background:#1a1a1a;padding:20px;border-radius:15px;margin:15px;display:inline-block;width:300px}
-   .score{font-size:40px;color:#00ff88}</style></head><body>
-    <h1>🔥 ClipViral AI - Dashboard</h1>
-    <p>Rate de viralidad: <b>92%</b> promedio | Sube hasta 2GB</p>
-    <form action="/upload" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" required><button>Analizar con IA</button>
-    </form>
-    <p id="st"></p>
-    <div id="res"></div>
-    <script>
-    document.querySelector('form').onsubmit = (e)=>{
-        document.getElementById('st').innerHTML='⏳ Espera... IA analizando momentos virales (puede tardar 2-3min para 2GB)';
-    }
-    </script>
-    </body></html>
-    """
+    return send_from_directory(ROOT, "dashboard.html")
 
-@app.route('/upload', methods=['POST'])
-def upload():
-    f = request.files.get('file')
-    if not f: return "No file", 400
-    vid = uuid.uuid4().hex[:8]
-    in_path = f"{TMP}/{vid}_full.mp4"
-    f.save(in_path)
 
-    # 1. Subir original a R2
-    s3.upload_file(in_path, R2_BUCKET, f"{vid}.mp4")
+@app.get("/<path:filename>")
+def assets(filename):
+    return send_from_directory(ROOT, filename)
 
-    # 2. IA detecta clips virales
-    viral_clips = analyze_virality(in_path)
 
-    # 3. Cortar los 6 clips
-    for c in viral_clips:
-        out = f"{TMP}/{vid}_clip{c['id']}.mp4"
-        cut_vertical_clip(in_path, out, c['start'])
-        s3.upload_file(out, R2_BUCKET, f"{vid}_clip{c['id']}.mp4")
+@app.post("/api/analyze")
+def analyze():
+    """Transcribe el vídeo y devuelve tres cortes sugeridos con sus timestamps."""
+    if not os.getenv("OPENAI_API_KEY"):
+        return jsonify(error="Falta configurar OPENAI_API_KEY en Render."), 503
+    uploaded = request.files.get("video")
+    if not uploaded or not uploaded.filename:
+        return jsonify(error="Envía un vídeo en el campo 'video'."), 400
 
-    # 4. Dashboard con resultados
-    html = f"<html><body style='font-family:Arial;background:#0a0a0a;color:white;text-align:center;padding:20px'><h1>✅ Análisis completo - {vid}</h1><p>Original: <a style='color:#00ff88' href='{R2_PUBLIC}/{vid}.mp4' target='_blank'>Ver</a></p><div style='display:flex;flex-wrap:wrap;justify-content:center'>"
-    for c in viral_clips:
-        html += f"""
-        <div style='background:#1a1a1a;padding:15px;border-radius:12px;margin:10px;width:320px'>
-            <div style='font-size:30px;color:#00ff88'>{c['virality_score']}%</div>
-            <b>Clip {c['id']+1} - {c['hook']}</b><br>
-            <small>{c['start']}s - {c['end']}s | {c['reason']}</small><br><br>
-            <video width='200' controls src='{R2_PUBLIC}/{vid}_clip{c['id']}.mp4'></video><br>
-            <a href='{R2_PUBLIC}/{vid}_clip{c['id']}.mp4' download style='color:#00ff88'>Descargar vertical 9:16</a>
-        </div>
-        """
-    html += "</div><br><a href='/' style='color:white'>Volver</a></body></html>"
-    return html
+    suffix = Path(uploaded.filename).suffix or ".mp4"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        uploaded.save(tmp.name)
+        temp_path = tmp.name
 
-@app.route('/health')
-def health(): return "OK"
+    try:
+        client = OpenAI()
+        # whisper-1 entrega segmentos con timestamps, indispensables para cortar el vídeo.
+        with open(temp_path, "rb") as media:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=media,
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+                language="es",
+            )
+        segments = [
+            {"start": round(s.start, 1), "end": round(s.end, 1), "text": s.text}
+            for s in (transcript.segments or [])
+        ]
+        prompt = """Eres editor experto de clips virales para streamers hispanos.
+Analiza los segmentos con timestamps. Propón exactamente 3 clips de 15 a 55 segundos,
+sin inventar tiempos fuera de los segmentos. Prioriza sorpresa, humor, conflicto,
+reacción, logro, frases contundentes o conversación que genere comentarios.
+Devuelve SOLAMENTE JSON válido con esta forma:
+{"clips":[{"start":12.0,"end":35.0,"score":86,"title":"texto corto","reason":"por qué puede funcionar"}]}.
+Puntuación 0-100: es una estimación, no una garantía de viralidad.
+SEGMENTOS:\n""" + json.dumps(segments, ensure_ascii=False)
+        result = client.responses.create(model="gpt-4.1-mini", input=prompt)
+        raw = result.output_text.strip().replace("```json", "").replace("```", "").strip()
+        clips = json.loads(raw).get("clips", [])
+        return jsonify(clips=clips, transcript=transcript.text)
+    except json.JSONDecodeError:
+        return jsonify(error="La IA devolvió un formato inesperado; prueba de nuevo."), 502
+    except Exception as exc:
+        app.logger.exception("Analysis failed")
+        return jsonify(error=f"No se pudo analizar el vídeo: {str(exc)}"), 502
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.getenv("PORT",10000)))
+
+@app.errorhandler(413)
+def too_large(_error):
+    return jsonify(error="El archivo supera 25 MB. Para streams grandes hay que añadir subida directa a almacenamiento."), 413
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
+"""Clipping API: análisis de transcripciones para encontrar momentos compartibles."""
+import json
+import os
+import tempfile
+from pathlib import Path
+
+from flask import Flask, jsonify, request, send_from_directory
+from openai import OpenAI
+
+ROOT = Path(__file__).parent
+app = Flask(__name__, static_folder=None)
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # Límite seguro para la primera versión.
+
+
+@app.get("/")
+def landing():
+    return send_from_directory(ROOT, "index.html")
+
+
+@app.get("/dashboard")
+def dashboard():
+    return send_from_directory(ROOT, "dashboard.html")
+
+
+@app.get("/<path:filename>")
+def assets(filename):
+    return send_from_directory(ROOT, filename)
+
+
+@app.post("/api/analyze")
+def analyze():
+    """Transcribe el vídeo y devuelve tres cortes sugeridos con sus timestamps."""
+    if not os.getenv("OPENAI_API_KEY"):
+        return jsonify(error="Falta configurar OPENAI_API_KEY en Render."), 503
+    uploaded = request.files.get("video")
+    if not uploaded or not uploaded.filename:
+        return jsonify(error="Envía un vídeo en el campo 'video'."), 400
+
+    suffix = Path(uploaded.filename).suffix or ".mp4"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        uploaded.save(tmp.name)
+        temp_path = tmp.name
+
+    try:
+        client = OpenAI()
+        # whisper-1 entrega segmentos con timestamps, indispensables para cortar el vídeo.
+        with open(temp_path, "rb") as media:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=media,
+                response_format="verbose_json",
+                timestamp_granularities=["segment"],
+                language="es",
+            )
+        segments = [
+            {"start": round(s.start, 1), "end": round(s.end, 1), "text": s.text}
+            for s in (transcript.segments or [])
+        ]
+        prompt = """Eres editor experto de clips virales para streamers hispanos.
+Analiza los segmentos con timestamps. Propón exactamente 3 clips de 15 a 55 segundos,
+sin inventar tiempos fuera de los segmentos. Prioriza sorpresa, humor, conflicto,
+reacción, logro, frases contundentes o conversación que genere comentarios.
+Devuelve SOLAMENTE JSON válido con esta forma:
+{"clips":[{"start":12.0,"end":35.0,"score":86,"title":"texto corto","reason":"por qué puede funcionar"}]}.
+Puntuación 0-100: es una estimación, no una garantía de viralidad.
+SEGMENTOS:\n""" + json.dumps(segments, ensure_ascii=False)
+        result = client.responses.create(model="gpt-4.1-mini", input=prompt)
+        raw = result.output_text.strip().replace("```json", "").replace("```", "").strip()
+        clips = json.loads(raw).get("clips", [])
+        return jsonify(clips=clips, transcript=transcript.text)
+    except json.JSONDecodeError:
+        return jsonify(error="La IA devolvió un formato inesperado; prueba de nuevo."), 502
+    except Exception as exc:
+        app.logger.exception("Analysis failed")
+        return jsonify(error=f"No se pudo analizar el vídeo: {str(exc)}"), 502
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+
+
+@app.errorhandler(413)
+def too_large(_error):
+    return jsonify(error="El archivo supera 25 MB. Para streams grandes hay que añadir subida directa a almacenamiento."), 413
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
